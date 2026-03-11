@@ -1,0 +1,92 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: fortress-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-fortress_db}
+      POSTGRES_USER: ${DB_USER:-fortress}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme123}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-fortress}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fortress-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: fortress-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fortress-network
+
+  # Go Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fortress-backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-fortress_db}
+      DB_USER: ${DB_USER:-fortress}
+      DB_PASSWORD: ${DB_PASSWORD:-changeme123}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: ${SERVER_PORT:-8080}
+      SERVER_ENV: ${SERVER_ENV:-production}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-this}
+    ports:
+      - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - fortress-network
+    restart: unless-stopped
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:${SERVER_PORT:-8080}
+    container_name: fortress-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:${SERVER_PORT:-8080}
+    depends_on:
+      - backend
+    networks:
+      - fortress-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  fortress-network:
+    driver: bridge
